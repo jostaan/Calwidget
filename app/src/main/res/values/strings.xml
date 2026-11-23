@@ -1,1 +1,6 @@
-
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Đồng hồ Lịch Thời tiết</string>
+    <string name="widget_label">Đồng hồ, lịch âm, thời tiết</string>
+    <string name="widget_desc">Giờ, ngày dương và âm lịch, thời tiết</string>
+</resources>
