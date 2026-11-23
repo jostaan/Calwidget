@@ -2,15 +2,16 @@
 
 Gói `vn.xin.clockwidget`. Hai phần hiển thị:
 
-1. **Widget màn hình chính** (4×2, đổi kích thước được): đồng hồ chạy thật (TextClock), ngày dương, âm lịch + can chi, ngày lễ / Rằm / mùng 1 / tiết khí, thời tiết Quận 11 (nhiệt độ, cảm giác, cao/thấp, xác suất mưa, độ ẩm, UV, AQI).
+1. **Widget màn hình chính** (4×2, đổi kích thước được), **2 cột**: cột trái là đồng hồ chạy thật (TextClock), ngày dương, âm lịch + can chi, ngày lễ / Rằm / mùng 1 / tiết khí; cột phải là thời tiết Quận 11 (nhiệt độ, cảm giác, cao/thấp, xác suất mưa, độ ẩm, UV, AQI). Lề trong chỉnh 0–24 dp (mặc định 6), bo góc 4 mức. Lề do launcher HyperOS đặt quanh widget thì app không đổi được.
 2. **Thẻ màn hình khóa** (tùy chọn): thông báo ghim yên lặng, cùng nội dung, đồng hồ chạy thật.
 
 ## Giới hạn cần biết
 
-- **Widget của app bên thứ ba không lên được màn hình khóa HyperOS.** Android gốc chỉ cho widget màn hình khóa ở chế độ "hub" khi sạc/dock, và HyperOS không công bố hỗ trợ. Vì vậy dùng thẻ thông báo thay thế. Giờ/ngày gốc của màn hình khóa đổi font và kiểu trong Cài đặt → Màn hình khóa (do hệ thống kiểm soát, app không can thiệp được).
+- **Widget của app bên thứ ba không lên được màn hình khóa HyperOS 3.** Một bài báo ngày 12/01/2026 (touchit.sk) xác nhận Android 16 có widget màn hình khóa nhưng điện thoại Xiaomi/Redmi/POCO chưa có; HyperOS 4 mới là dự kiến, chưa được xác nhận. Vì vậy dùng thẻ thông báo thay thế. Giờ/ngày gốc của màn hình khóa đổi font và kiểu trong Cài đặt → Màn hình khóa (do hệ thống kiểm soát, app không can thiệp được).
 - Thẻ khóa phụ thuộc cài đặt hiện thông báo trên màn hình khóa. Từ Android 14 bạn vuốt bỏ được thẻ; thẻ hiện lại ở lần cập nhật kế tiếp.
 - Font: 11 họ Google Fonts (OFL) đóng sẵn trong app, đủ dấu tiếng Việt. Thêm font mới cần build lại. App không tải font lúc chạy.
 - Thời tiết: Open-Meteo (không cần khóa, chỉ dùng phi thương mại). AQI là mô hình ~45 km, không phải số liệu trạm đo.
+- Nếu app báo lỗi hoặc văng: mở lại app, mục đầu trang hiện "Lỗi gần nhất" kèm nút **Sao chép lỗi**. Gửi nội dung đó để sửa chính xác.
 - Chưa chạy thử trên máy thật. Mã Kotlin đã được kiểm tra kiểu với Android API 33; tài nguyên và Gradle chỉ được xác nhận khi chạy workflow.
 
 ## Build bằng điện thoại (GitHub Actions)
