@@ -1,1 +1,68 @@
+name: Build Clock Widget APK
 
+# Chạy thủ công: tab Actions -> Build Clock Widget APK -> Run workflow.
+# Mã nguồn nằm trong lockscreen-widget.zip ở thư mục gốc repo; workflow tự giải nén rồi build.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Unpack project
+        run: |
+          if [ ! -f lockscreen-widget.zip ]; then
+            echo "Thiếu lockscreen-widget.zip ở thư mục gốc repo. Hãy tải tệp này lên rồi chạy lại."
+            exit 1
+          fi
+          rm -rf _widget_src
+          mkdir _widget_src
+          unzip -q lockscreen-widget.zip -d _widget_src
+          test -f _widget_src/lockscreen-widget/settings.gradle.kts
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Prepare Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Build debug APK
+        working-directory: _widget_src/lockscreen-widget
+        run: gradle assembleDebug --stacktrace
+
+      - name: Name the APK
+        run: cp _widget_src/lockscreen-widget/app/build/outputs/apk/debug/app-debug.apk ClockWidget.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clock-widget-apk
+          path: ClockWidget.apk
+          if-no-files-found: error
+
+      # Tag riêng "widget-N", không chiếm nhãn Latest của app khác trong cùng repo.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "widget-${{ github.run_number }}" ClockWidget.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Clock Widget ${{ github.run_number }}" \
+            --notes "Commit $GITHUB_SHA" \
+            --latest=false
