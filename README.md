@@ -11,7 +11,7 @@ Gói `vn.xin.clockwidget`. Hai phần hiển thị:
 - Thẻ khóa phụ thuộc cài đặt hiện thông báo trên màn hình khóa. Từ Android 14 bạn vuốt bỏ được thẻ; thẻ hiện lại ở lần cập nhật kế tiếp.
 - Font: 11 họ Google Fonts (OFL) đóng sẵn trong app, đủ dấu tiếng Việt. Thêm font mới cần build lại. App không tải font lúc chạy.
 - Thời tiết: Open-Meteo (không cần khóa, chỉ dùng phi thương mại). AQI là mô hình ~45 km, không phải số liệu trạm đo.
-- Nếu app báo lỗi hoặc văng: mở lại app, mục đầu trang hiện "Lỗi gần nhất" kèm nút **Sao chép lỗi**. Gửi nội dung đó để sửa chính xác.
+- Nếu app báo lỗi hoặc văng: mở lại app, mục đầu trang hiện "Lỗi gần nhất" kèm nút **Sao chép lỗi**. Cuối trang có mục **Chẩn đoán** (job nền, báo thức, pin, thời tiết, lỗi mạng) kèm nút **Sao chép báo cáo**. Gửi nội dung đó để sửa chính xác. Đừng xóa dữ liệu app trước khi sao chép, vì thao tác đó xóa cả bản ghi lỗi.
 - Chưa chạy thử trên máy thật. Mã Kotlin đã được kiểm tra kiểu với Android API 33; tài nguyên và Gradle chỉ được xác nhận khi chạy workflow.
 
 ## Build bằng điện thoại (GitHub Actions)
@@ -37,7 +37,8 @@ Cập nhật sau này: chỉ tải đè `lockscreen-widget.zip`, chạy lại wo
 ## Cơ chế cập nhật
 
 - Đồng hồ: TextClock tự chạy, không tốn pin cập nhật.
-- Thời tiết: JobScheduler ~30 phút, cần mạng; dữ liệu lưu sẵn, mất mạng vẫn hiển thị (ghi chú giờ cập nhật nếu cũ hơn 90 phút).
+- Thời tiết: ba đường độc lập, đường nào chạy cũng đủ: (1) JobScheduler ~30 phút, (2) báo thức gần đúng ~30 phút tự đặt lại, (3) lệnh cập nhật định kỳ của widget (30 phút). Dữ liệu lưu sẵn, mất mạng vẫn hiển thị (ghi chú giờ cập nhật nếu cũ hơn 90 phút). Nếu chưa lấy được, cột phải ghi rõ lý do (ví dụ HTTP 403, UnknownHostException).
+- Mọi bước lập lịch và vẽ đều bọc try/catch riêng và ghi lỗi vào bản ghi trong app; vẽ widget luôn chạy trước bước lập lịch.
 - Ngày/âm lịch: báo thức sau 00:00 mỗi ngày, cộng thêm khi đổi giờ, múi giờ, khởi động lại.
 - Không dùng foreground service.
 
