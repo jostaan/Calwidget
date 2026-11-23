@@ -27,20 +27,50 @@ object WeatherRepo {
     private const val FORECAST = "https://api.open-meteo.com/v1/forecast"
     private const val AIR = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
-    private fun httpGet(urlStr: String): String? {
+    /** Lý do thất bại của lần httpGet gần nhất (hiện ở thanh trạng thái để biết vì sao không có thời tiết). */
+    @Volatile
+    private var httpErr = ""
+
+    private fun httpGetOnce(urlStr: String): String? {
         var conn: HttpURLConnection? = null
         return try {
             conn = URL(urlStr).openConnection() as HttpURLConnection
-            conn.connectTimeout = 10000
-            conn.readTimeout = 15000
+            conn.connectTimeout = 6000
+            conn.readTimeout = 8000
             conn.requestMethod = "GET"
-            conn.setRequestProperty("User-Agent", "ClockWidget/1.0 (personal use)")
-            if (conn.responseCode != 200) null else conn.inputStream.bufferedReader().use { it.readText() }
+            conn.setRequestProperty("User-Agent", "ClockWidget/1.2 (personal use)")
+            val code = conn.responseCode
+            if (code != 200) {
+                httpErr = "HTTP $code"
+                null
+            } else {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            }
         } catch (e: Exception) {
+            httpErr = e.javaClass.simpleName + (e.message?.let { ": " + it.take(60) } ?: "")
             null
         } finally {
             conn?.disconnect()
         }
+    }
+
+    /**
+     * Thử tối đa 2 lần (cách nhau 2 giây): mạng vừa bật lại thường lỗi nhanh ở lần đầu.
+     * Chỉ thử lại khi lần đầu thất bại trong < 4 giây, để tổng thời gian không vượt giới hạn của receiver.
+     */
+    private fun httpGet(urlStr: String): String? {
+        httpErr = ""
+        val t0 = System.currentTimeMillis()
+        var r = httpGetOnce(urlStr)
+        if (r == null && System.currentTimeMillis() - t0 < 4000) {
+            try {
+                Thread.sleep(2000)
+            } catch (e: InterruptedException) {
+                // Bỏ qua.
+            }
+            r = httpGetOnce(urlStr)
+        }
+        return r
     }
 
     private fun parse(json: String, aqi: Int, fetchedAt: Long): Weather? {
@@ -106,6 +136,7 @@ object WeatherRepo {
 
     /** Trả về true nếu lấy và lưu thành công. Gọi ngoài luồng chính. */
     fun refresh(ctx: Context): Boolean {
+        val startMs = System.currentTimeMillis()
         val ll = String.format(Locale.US, "latitude=%.4f&longitude=%.4f", Prefs.lat(ctx), Prefs.lon(ctx))
         val url = FORECAST + "?" + ll +
             "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,wind_speed_10m" +
@@ -115,7 +146,7 @@ object WeatherRepo {
 
         val forecast = httpGet(url)
         if (forecast == null) {
-            Prefs.putStr(ctx, Prefs.LAST_ERR, "Không kết nối được máy chủ thời tiết")
+            Prefs.putStr(ctx, Prefs.LAST_ERR, "Không lấy được thời tiết (" + httpErr + ")")
             return false
         }
         if (parse(forecast, -1, 0L) == null) {
@@ -124,7 +155,8 @@ object WeatherRepo {
         }
 
         var aqi = -1
-        val air = httpGet(AIR + "?" + ll + "&current=us_aqi&timezone=auto")
+        // Bỏ qua AQI nếu mạng đã chậm: dữ liệu chính quan trọng hơn và receiver có giới hạn thời gian.
+        val air = if (System.currentTimeMillis() - startMs > 9000) null else httpGet(AIR + "?" + ll + "&current=us_aqi&timezone=auto")
         if (air != null) {
             try {
                 aqi = JSONObject(air).getJSONObject("current").optInt("us_aqi", -1)

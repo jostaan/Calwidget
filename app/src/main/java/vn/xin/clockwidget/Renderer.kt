@@ -98,6 +98,9 @@ object Renderer {
         val w = WeatherRepo.load(ctx)
         if (w == null) {
             out.add(Line("Chưa có dữ liệu thời tiết", 1.0f, false, true, 2))
+            // Hiện luôn lý do trên widget để biết lỗi mạng hay lỗi khác, không cần mở app.
+            val err = Prefs.str(ctx, Prefs.LAST_ERR, "")
+            out.add(Line(if (err.isNotEmpty()) err else "Đang chờ cập nhật từ mạng", 0.85f, false, true, 3))
             return out
         }
         out.add(Line("${VnText.weatherIcon(w.code, w.isDay)} ${Math.round(w.tempC)}°C", 2.0f, true, false, 1))

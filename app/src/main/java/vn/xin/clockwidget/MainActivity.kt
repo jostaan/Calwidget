@@ -45,6 +45,7 @@ class MainActivity : Activity() {
     private val applyRunnable = Runnable { applyNow() }
     private var lastLoc = ""
     private var ready = false
+    private var diagView: TextView? = null
 
     private companion object {
         const val PREVIEW_H_DP = 150
@@ -108,6 +109,7 @@ class MainActivity : Activity() {
                         if (ready) {
                             refreshPreview()
                             updateStatus()
+                            diagView?.text = Diag.report(app)
                         }
                         Updater.updateAll(app)
                     } catch (t: Throwable) {
@@ -518,6 +520,18 @@ class MainActivity : Activity() {
             addNote("Thủ công: khóa app trong màn hình đa nhiệm (nhấn giữ thẻ app, chọn biểu tượng khóa).")
         }
 
+        guard("chẩn đoán") {
+            addTitle("Chẩn đoán (sao chép gửi khi cần hỗ trợ)")
+            val tv = TextView(this)
+            tv.textSize = 12f
+            tv.setTextIsSelectable(true)
+            tv.text = Diag.report(this)
+            col.addView(tv, lp())
+            diagView = tv
+            addButton("Sao chép báo cáo") { copyText("báo cáo", Diag.report(this)) }
+            addButton("Làm mới báo cáo") { diagView?.text = Diag.report(this) }
+        }
+
         refreshPreview()
         updateStatus()
         if (WeatherRepo.ageMinutes(this) > 25) fetchWeather(false)
@@ -530,6 +544,7 @@ class MainActivity : Activity() {
             Updater.scheduleAll(this)
             refreshPreview()
             updateStatus()
+            diagView?.text = Diag.report(this)
         } catch (t: Throwable) {
             CrashLog.record(this, t, "onResume")
         }

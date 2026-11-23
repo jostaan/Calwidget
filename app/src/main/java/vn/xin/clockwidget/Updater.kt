@@ -15,6 +15,8 @@ import java.time.ZoneId
 object Updater {
     private const val JOB_ID = 7301
     private const val ACTION_MIDNIGHT = "vn.xin.clockwidget.MIDNIGHT"
+    private const val ACTION_TICK = "vn.xin.clockwidget.TICK"
+    private const val TICK_MS = 30 * 60 * 1000L
     private const val STALE_MINUTES = 25L
 
     fun widgetIds(c: Context): IntArray {
@@ -28,19 +30,24 @@ object Updater {
         try {
             val mgr = AppWidgetManager.getInstance(c)
             for (id in widgetIds(c)) {
-                val opt = mgr.getAppWidgetOptions(id)
-                // Chế độ dọc: rộng = MIN_WIDTH, cao = MAX_HEIGHT.
-                val wDp = opt.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250)
-                val hDp = opt.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 150)
-                mgr.updateAppWidget(id, Renderer.widgetViews(c, wDp, hDp))
+                // Mỗi widget vẽ riêng: một widget lỗi không làm hỏng widget khác hay thẻ khóa.
+                try {
+                    val opt = mgr.getAppWidgetOptions(id)
+                    // Chế độ dọc: rộng = MIN_WIDTH, cao = MAX_HEIGHT.
+                    val wDp = opt.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250)
+                    val hDp = opt.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 150)
+                    mgr.updateAppWidget(id, Renderer.widgetViews(c, wDp, hDp))
+                } catch (t: Throwable) {
+                    CrashLog.record(c, t, "updateAll/widget $id")
+                }
             }
-        } catch (e: Exception) {
-            // Một widget lỗi không được làm hỏng các việc còn lại.
+        } catch (t: Throwable) {
+            CrashLog.record(c, t, "updateAll")
         }
         try {
             LockCard.update(c)
-        } catch (e: Exception) {
-            // Bỏ qua.
+        } catch (t: Throwable) {
+            CrashLog.record(c, t, "updateAll/lockcard")
         }
     }
 
@@ -81,7 +88,16 @@ object Updater {
         } catch (e: Throwable) {
             CrashLog.record(c, e, "scheduleMidnight")
         }
+        try {
+            scheduleTick(c)
+        } catch (e: Throwable) {
+            CrashLog.record(c, e, "scheduleTick")
+        }
     }
+
+    /** Có job định kỳ đang chờ không (dùng cho báo cáo chẩn đoán). */
+    fun jobPending(c: Context): Boolean =
+        c.getSystemService(JobScheduler::class.java).getPendingJob(JOB_ID) != null
 
     private fun scheduleJob(c: Context) {
         val js = c.getSystemService(JobScheduler::class.java)
@@ -122,9 +138,28 @@ object Updater {
         if (!done) am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
     }
 
+    private fun tickPi(c: Context): PendingIntent =
+        PendingIntent.getBroadcast(
+            c,
+            92,
+            Intent(c, SystemReceiver::class.java).setAction(ACTION_TICK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+    /**
+     * Báo thức gần đúng mỗi ~30 phút, độc lập với JobScheduler: nếu job bị ROM chặn hoặc lập lịch lỗi,
+     * chuỗi này vẫn kéo thời tiết về. Mỗi lần nổ, SystemReceiver gọi scheduleAll để đặt lại báo thức kế tiếp.
+     */
+    private fun scheduleTick(c: Context) {
+        val am = c.getSystemService(AlarmManager::class.java)
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + TICK_MS, tickPi(c))
+    }
+
     fun cancelAll(ctx: Context) {
         val c = ctx.applicationContext
         c.getSystemService(JobScheduler::class.java).cancel(JOB_ID)
-        c.getSystemService(AlarmManager::class.java).cancel(midnightPi(c))
+        val am = c.getSystemService(AlarmManager::class.java)
+        am.cancel(midnightPi(c))
+        am.cancel(tickPi(c))
     }
 }
