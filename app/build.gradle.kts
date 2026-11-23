@@ -13,8 +13,8 @@ android {
         applicationId = "vn.xin.clockwidget"
         minSdk = 33
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     // Khóa debug cố định: mọi bản build cùng chữ ký nên cài đè được lên bản cũ.
