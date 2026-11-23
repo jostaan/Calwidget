@@ -54,14 +54,33 @@ object Updater {
     /** Có cần chạy nền không: có widget trên màn hình hoặc bật thẻ khóa. */
     private fun needed(c: Context): Boolean = widgetIds(c).isNotEmpty() || Prefs.lockCard(c)
 
+    /** Mỗi bước được bọc riêng: một lỗi lập lịch không được làm văng app hay các bước còn lại. */
     fun scheduleAll(ctx: Context) {
         val c = ctx.applicationContext
-        if (!needed(c)) {
-            cancelAll(c)
+        val need = try {
+            needed(c)
+        } catch (e: Throwable) {
+            CrashLog.record(c, e, "scheduleAll/needed")
             return
         }
-        scheduleJob(c)
-        scheduleMidnight(c)
+        if (!need) {
+            try {
+                cancelAll(c)
+            } catch (e: Throwable) {
+                CrashLog.record(c, e, "cancelAll")
+            }
+            return
+        }
+        try {
+            scheduleJob(c)
+        } catch (e: Throwable) {
+            CrashLog.record(c, e, "scheduleJob")
+        }
+        try {
+            scheduleMidnight(c)
+        } catch (e: Throwable) {
+            CrashLog.record(c, e, "scheduleMidnight")
+        }
     }
 
     private fun scheduleJob(c: Context) {
@@ -91,11 +110,16 @@ object Updater {
             .plusSeconds(20)
             .toInstant()
             .toEpochMilli()
+        var done = false
         if (am.canScheduleExactAlarms()) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
-        } else {
-            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
+            try {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
+                done = true
+            } catch (e: SecurityException) {
+                // ROM không cấp quyền báo thức chính xác: dùng báo thức gần đúng.
+            }
         }
+        if (!done) am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
     }
 
     fun cancelAll(ctx: Context) {

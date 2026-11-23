@@ -27,11 +27,14 @@ object Prefs {
     const val W_TIME = "wTime"
     const val W_AQI = "wAqi"
     const val LAST_ERR = "lastErr"
+    const val PAD_DP = "padDp"
+    const val CORNER = "corner"
+    const val LAST_CRASH = "lastCrash"
 
     const val DEF_LAT = 10.7629
     const val DEF_LON = 106.6500
 
-    private fun sp(c: Context) = c.getSharedPreferences("clockwidget", Context.MODE_PRIVATE)
+    fun sp(c: Context) = c.getSharedPreferences("clockwidget", Context.MODE_PRIVATE)
 
     fun int(c: Context, k: String, d: Int): Int = sp(c).getInt(k, d)
     fun bool(c: Context, k: String, d: Boolean): Boolean = sp(c).getBoolean(k, d)
@@ -72,6 +75,8 @@ object Prefs {
     fun lockStyle(c: Context): Int = int(c, LOCK_STYLE, 0)
     fun lockColor(c: Context): Int = int(c, LOCK_COLOR, 0)
     fun locName(c: Context): String = str(c, LOC_NAME, "Quận 11")
+    fun padDp(c: Context): Int = int(c, PAD_DP, 6).coerceIn(0, 24)
+    fun corner(c: Context): Int = int(c, CORNER, 2).coerceIn(0, 3)
 
     private fun parseCoord(s: String, min: Double, max: Double, def: Double): Double {
         val v = s.trim().replace(',', '.').toDoubleOrNull() ?: return def

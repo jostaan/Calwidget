@@ -3,6 +3,8 @@ package vn.xin.clockwidget
 import android.Manifest
 import android.app.Activity
 import android.appwidget.AppWidgetManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Color
@@ -42,6 +44,7 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val applyRunnable = Runnable { applyNow() }
     private var lastLoc = ""
+    private var ready = false
 
     private companion object {
         const val PREVIEW_H_DP = 150
@@ -63,6 +66,12 @@ class MainActivity : Activity() {
 
     private fun locKey(): String = Prefs.lat(this).toString() + "," + Prefs.lon(this).toString()
 
+    private fun copyText(label: String, text: String) {
+        val cm = getSystemService(ClipboardManager::class.java)
+        cm.setPrimaryClip(ClipData.newPlainText(label, text))
+        toast("Đã sao chép")
+    }
+
     // ---------- áp dụng thay đổi ----------
 
     private fun changed() {
@@ -71,28 +80,42 @@ class MainActivity : Activity() {
     }
 
     private fun applyNow() {
-        val k = locKey()
-        if (k != lastLoc) {
-            lastLoc = k
-            fetchWeather(false)
+        try {
+            val k = locKey()
+            if (k != lastLoc) {
+                lastLoc = k
+                fetchWeather(false)
+            }
+            refreshPreview()
+            Updater.updateAll(this)
+            Updater.scheduleAll(this)
+            updateStatus()
+        } catch (t: Throwable) {
+            CrashLog.record(this, t, "applyNow")
         }
-        refreshPreview()
-        Updater.updateAll(this)
-        Updater.scheduleAll(this)
-        updateStatus()
     }
 
     private fun fetchWeather(showToast: Boolean) {
         val app = applicationContext
         Thread {
-            val ok = WeatherRepo.refresh(app)
-            runOnUiThread {
-                if (showToast) {
-                    toast(if (ok) "Đã cập nhật thời tiết" else Prefs.str(app, Prefs.LAST_ERR, "").ifEmpty { "Lỗi" })
+            try {
+                val ok = WeatherRepo.refresh(app)
+                runOnUiThread {
+                    try {
+                        if (showToast) {
+                            toast(if (ok) "Đã cập nhật thời tiết" else Prefs.str(app, Prefs.LAST_ERR, "").ifEmpty { "Lỗi" })
+                        }
+                        if (ready) {
+                            refreshPreview()
+                            updateStatus()
+                        }
+                        Updater.updateAll(app)
+                    } catch (t: Throwable) {
+                        CrashLog.record(app, t, "fetchWeather/ui")
+                    }
                 }
-                refreshPreview()
-                Updater.updateAll(app)
-                updateStatus()
+            } catch (t: Throwable) {
+                CrashLog.record(app, t, "fetchWeather")
             }
         }.start()
     }
@@ -104,9 +127,11 @@ class MainActivity : Activity() {
         try {
             val rv = Renderer.widgetViews(applicationContext, wDp, PREVIEW_H_DP)
             previewHost.addView(rv.apply(this, previewHost))
-        } catch (e: Exception) {
+        } catch (t: Throwable) {
+            CrashLog.record(this, t, "preview")
             val tv = TextView(this)
-            tv.text = "Không dựng được bản xem trước: " + e.javaClass.simpleName
+            tv.text = "Không dựng được bản xem trước: " + t.javaClass.simpleName
+            tv.setTextColor(Color.WHITE)
             previewHost.addView(tv)
         }
     }
@@ -270,12 +295,21 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- vòng đời ----------
+    /** Mỗi mục giao diện dựng riêng: một mục lỗi không làm mất cả màn hình, và lỗi được ghi lại. */
+    private fun guard(name: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (t: Throwable) {
+            CrashLog.record(this, t, "UI/$name")
+            val tv = TextView(this)
+            tv.text = "Lỗi ở mục \"$name\": " + t.javaClass.simpleName + ": " + t.message
+            col.addView(tv, lp())
+        }
+    }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        lastLoc = locKey()
+    // ---------- dựng màn hình ----------
 
+    private fun scrollRoot(): ScrollView {
         val root = ScrollView(this)
         col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
@@ -286,13 +320,84 @@ class MainActivity : Activity() {
             v.setPadding(b.left, b.top, b.right, b.bottom)
             WindowInsets.CONSUMED
         }
+        return root
+    }
+
+    /** Màn hình dự phòng khi dựng giao diện chính bị lỗi: hiện nội dung lỗi để sao chép. */
+    private fun showFatal(t: Throwable) {
+        val root = ScrollView(this)
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(16), dp(48), dp(16), dp(24))
+        root.addView(box)
+
+        val head = TextView(this)
+        head.text = "App gặp lỗi khi mở. Nội dung lỗi (sao chép gửi người hỗ trợ):"
+        head.textSize = 16f
+        box.addView(head, lp())
+
+        val text = CrashLog.last(this).ifEmpty { t.javaClass.name + ": " + t.message }
+        val tv = TextView(this)
+        tv.text = text
+        tv.textSize = 11f
+        tv.setTextIsSelectable(true)
+        tv.setPadding(0, dp(12), 0, dp(12))
+        box.addView(tv, lp())
+
+        val b1 = Button(this)
+        b1.text = "Sao chép lỗi"
+        b1.isAllCaps = false
+        b1.setOnClickListener { copyText("lỗi", text) }
+        box.addView(b1, lp())
+
+        val b2 = Button(this)
+        b2.text = "Xóa cài đặt và thử lại"
+        b2.isAllCaps = false
+        b2.setOnClickListener {
+            Prefs.sp(this).edit().clear().commit()
+            recreate()
+        }
+        box.addView(b2, lp())
         setContentView(root)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        try {
+            build()
+            ready = true
+        } catch (t: Throwable) {
+            CrashLog.record(this, t, "onCreate")
+            showFatal(t)
+        }
+    }
+
+    private fun build() {
+        lastLoc = locKey()
+        setContentView(scrollRoot())
 
         val head = TextView(this)
         head.text = "Đồng hồ · Lịch · Thời tiết"
         head.textSize = 24f
         head.setTypeface(head.typeface, Typeface.BOLD)
         col.addView(head, lp())
+
+        guard("lỗi đã ghi") {
+            val last = CrashLog.last(this)
+            if (last.isNotEmpty()) {
+                addNote("Lỗi gần nhất được ghi lại (sao chép gửi người hỗ trợ nếu app còn lỗi):")
+                val tv = TextView(this)
+                tv.text = last.take(1500)
+                tv.textSize = 11f
+                tv.setTextIsSelectable(true)
+                col.addView(tv, lp())
+                addButton("Sao chép lỗi") { copyText("lỗi", last) }
+                addButton("Xóa ghi nhận lỗi") {
+                    CrashLog.clear(this)
+                    recreate()
+                }
+            }
+        }
 
         // Bản xem trước (cùng RemoteViews với widget thật)
         previewHost = FrameLayout(this)
@@ -303,97 +408,115 @@ class MainActivity : Activity() {
         col.addView(previewHost, plp)
         tvStatus = addNote("")
 
-        addNote(
-            "Màn hình khóa: widget của app khác thường không lên được màn hình khóa HyperOS. " +
-                "Dùng \"Thẻ màn hình khóa\" bên dưới (thông báo ghim). Giờ gốc của màn hình khóa đổi kiểu và font trong Cài đặt hệ thống."
-        )
-
-        addTitle("Thêm vào màn hình")
-        addButton("Thêm widget vào màn hình chính") {
-            val mgr = AppWidgetManager.getInstance(this)
-            if (mgr.isRequestPinAppWidgetSupported) {
-                mgr.requestPinAppWidget(ComponentName(this, ClockWidgetProvider::class.java), null, null)
-            } else {
-                toast("Giữ lâu màn hình chính, chọn Widget, tìm \"Đồng hồ, lịch âm, thời tiết\".")
+        guard("thêm widget") {
+            addTitle("Thêm vào màn hình")
+            addButton("Thêm widget vào màn hình chính") {
+                val mgr = AppWidgetManager.getInstance(this)
+                if (mgr.isRequestPinAppWidgetSupported) {
+                    mgr.requestPinAppWidget(ComponentName(this, ClockWidgetProvider::class.java), null, null)
+                } else {
+                    toast("Giữ lâu màn hình chính, chọn Widget, tìm \"Đồng hồ, lịch âm, thời tiết\".")
+                }
             }
         }
 
-        addTitle("Vị trí thời tiết")
-        addField("Tên hiển thị", Prefs.locName(this), InputType.TYPE_CLASS_TEXT) {
-            Prefs.putStr(this, Prefs.LOC_NAME, it)
-        }
-        val numType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
-        addField("Vĩ độ (Quận 11: 10.7629)", Prefs.str(this, Prefs.LAT, Prefs.DEF_LAT.toString()), numType) {
-            Prefs.putStr(this, Prefs.LAT, it)
-        }
-        addField("Kinh độ (Quận 11: 106.65)", Prefs.str(this, Prefs.LON, Prefs.DEF_LON.toString()), numType) {
-            Prefs.putStr(this, Prefs.LON, it)
-        }
-        addButton("Lấy thời tiết ngay") { fetchWeather(true) }
-
-        addTitle("Kiểu chữ")
-        addSpinner("Font Google", FontCatalog.all.map { it.label },
-            { Prefs.font(this) }, { Prefs.putInt(this, Prefs.FONT, it) })
-        addSpinner("Căn lề", listOf("Căn trái", "Căn giữa", "Căn phải"),
-            { Prefs.align(this) }, { Prefs.putInt(this, Prefs.ALIGN, it) })
-        addSeek("Cỡ chữ đồng hồ (sp)", 30, 110, { Prefs.clockSp(this) }, { Prefs.putInt(this, Prefs.CLOCK_SP, it) })
-        addSeek("Cỡ chữ thông tin (sp)", 10, 24, { Prefs.infoSp(this) }, { Prefs.putInt(this, Prefs.INFO_SP, it) })
-
-        addTitle("Màu sắc")
-        addColorPicker("Màu chữ", Prefs.TEXT_COLOR, -1)
-        addColorPicker("Màu nền", Prefs.BG_COLOR, -16777216)
-        addSeek("Độ đậm nền (%)", 0, 100, { Prefs.bgAlpha(this) }, { Prefs.putInt(this, Prefs.BG_ALPHA, it) })
-
-        addTitle("Nội dung")
-        addSwitch("Đồng hồ 24 giờ", { Prefs.is24h(this) }, { Prefs.putBool(this, Prefs.H24, it) })
-        addSwitch("Ngày dạng dài (22 tháng 11, 2026)", { Prefs.longDate(this) }, { Prefs.putBool(this, Prefs.LONG_DATE, it) })
-        addSwitch("Âm lịch", { Prefs.showLunar(this) }, { Prefs.putBool(this, Prefs.SHOW_LUNAR, it) })
-        addSwitch("Âm lịch chi tiết (can chi tháng, ngày, năm)", { Prefs.lunarDetail(this) }, { Prefs.putBool(this, Prefs.LUNAR_DETAIL, it) })
-        addSwitch("Ngày lễ, Rằm, mùng 1 và tiết khí", { Prefs.showEvents(this) }, { Prefs.putBool(this, Prefs.SHOW_EVENTS, it) })
-        addSwitch("Thời tiết", { Prefs.showWeather(this) }, { Prefs.putBool(this, Prefs.SHOW_WEATHER, it) })
-        addSwitch("Chi tiết thời tiết (cao/thấp, mưa, ẩm, UV, AQI)", { Prefs.showExtra(this) }, { Prefs.putBool(this, Prefs.SHOW_EXTRA, it) })
-
-        addTitle("Thẻ màn hình khóa")
-        addNote(
-            "Thông báo ghim yên lặng, có đồng hồ chạy thật. Cần bật hiện thông báo trên màn hình khóa " +
-                "(Cài đặt hệ thống → Thông báo → Màn hình khóa). Từ Android 14, bạn vuốt bỏ được thẻ này; " +
-                "thẻ tự hiện lại ở lần cập nhật kế tiếp."
-        )
-        addSwitch("Hiện thẻ trên màn hình khóa", { Prefs.lockCard(this) }, {
-            Prefs.putBool(this, Prefs.LOCK_CARD, it)
-            if (it && !LockCard.hasPermission(this)) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5)
+        guard("vị trí") {
+            addTitle("Vị trí thời tiết")
+            addField("Tên hiển thị", Prefs.locName(this), InputType.TYPE_CLASS_TEXT) {
+                Prefs.putStr(this, Prefs.LOC_NAME, it)
             }
-        })
-        addSpinner("Kiểu thẻ", listOf("Bố cục riêng (font Google, đồng hồ chạy thật)", "Văn bản đơn giản của hệ thống"),
-            { Prefs.lockStyle(this) }, { Prefs.putInt(this, Prefs.LOCK_STYLE, it) })
-        addSpinner("Màu chữ của thẻ", listOf("Tự động theo giao diện sáng/tối", "Chữ trắng", "Chữ đen"),
-            { Prefs.lockColor(this) }, { Prefs.putInt(this, Prefs.LOCK_COLOR, it) })
-        addButton("Cài đặt thông báo của app") {
-            safeStart(
-                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            val numType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
+            addField("Vĩ độ (Quận 11: 10.7629)", Prefs.str(this, Prefs.LAT, Prefs.DEF_LAT.toString()), numType) {
+                Prefs.putStr(this, Prefs.LAT, it)
+            }
+            addField("Kinh độ (Quận 11: 106.65)", Prefs.str(this, Prefs.LON, Prefs.DEF_LON.toString()), numType) {
+                Prefs.putStr(this, Prefs.LON, it)
+            }
+            addButton("Lấy thời tiết ngay") { fetchWeather(true) }
+        }
+
+        guard("bố cục") {
+            addTitle("Bố cục widget")
+            addNote("Hai cột: trái là đồng hồ, ngày, âm lịch; phải là thời tiết. Tắt thời tiết thì cột trái chiếm cả widget.")
+            addSeek("Lề trong widget (dp, 0 = sát viền)", 0, 24, { Prefs.padDp(this) }, { Prefs.putInt(this, Prefs.PAD_DP, it) })
+            addSpinner("Bo góc nền", listOf("Vuông", "Nhỏ", "Vừa", "Lớn"),
+                { Prefs.corner(this) }, { Prefs.putInt(this, Prefs.CORNER, it) })
+        }
+
+        guard("kiểu chữ") {
+            addTitle("Kiểu chữ")
+            addSpinner("Font Google", FontCatalog.all.map { it.label },
+                { Prefs.font(this) }, { Prefs.putInt(this, Prefs.FONT, it) })
+            addSpinner("Căn lề chữ trong mỗi cột", listOf("Căn trái", "Căn giữa", "Căn phải"),
+                { Prefs.align(this) }, { Prefs.putInt(this, Prefs.ALIGN, it) })
+            addSeek("Cỡ chữ đồng hồ tối đa (sp, tự thu nhỏ nếu không vừa cột)", 30, 110,
+                { Prefs.clockSp(this) }, { Prefs.putInt(this, Prefs.CLOCK_SP, it) })
+            addSeek("Cỡ chữ thông tin (sp)", 10, 24, { Prefs.infoSp(this) }, { Prefs.putInt(this, Prefs.INFO_SP, it) })
+        }
+
+        guard("màu sắc") {
+            addTitle("Màu sắc")
+            addColorPicker("Màu chữ", Prefs.TEXT_COLOR, -1)
+            addColorPicker("Màu nền", Prefs.BG_COLOR, -16777216)
+            addSeek("Độ đậm nền (%)", 0, 100, { Prefs.bgAlpha(this) }, { Prefs.putInt(this, Prefs.BG_ALPHA, it) })
+        }
+
+        guard("nội dung") {
+            addTitle("Nội dung")
+            addSwitch("Đồng hồ 24 giờ", { Prefs.is24h(this) }, { Prefs.putBool(this, Prefs.H24, it) })
+            addSwitch("Ngày dạng dài (22 tháng 11, 2026)", { Prefs.longDate(this) }, { Prefs.putBool(this, Prefs.LONG_DATE, it) })
+            addSwitch("Âm lịch", { Prefs.showLunar(this) }, { Prefs.putBool(this, Prefs.SHOW_LUNAR, it) })
+            addSwitch("Âm lịch chi tiết (can chi tháng, ngày)", { Prefs.lunarDetail(this) }, { Prefs.putBool(this, Prefs.LUNAR_DETAIL, it) })
+            addSwitch("Ngày lễ, Rằm, mùng 1 và tiết khí", { Prefs.showEvents(this) }, { Prefs.putBool(this, Prefs.SHOW_EVENTS, it) })
+            addSwitch("Thời tiết (cột phải)", { Prefs.showWeather(this) }, { Prefs.putBool(this, Prefs.SHOW_WEATHER, it) })
+            addSwitch("Chi tiết thời tiết (cao/thấp, mưa, ẩm, UV, AQI)", { Prefs.showExtra(this) }, { Prefs.putBool(this, Prefs.SHOW_EXTRA, it) })
+        }
+
+        guard("màn hình khóa") {
+            addTitle("Màn hình khóa")
+            addNote(
+                "HyperOS 3 không cho widget của app bên thứ ba lên màn hình khóa (chưa có tính năng này). " +
+                    "Cách thay thế trong app này là thẻ thông báo ghim bên dưới: bật công tắc, cấp quyền thông báo, " +
+                    "rồi kiểm tra thẻ ở màn hình khóa (vuốt xuống từ đỉnh màn hình khóa nếu thẻ bị gộp)."
             )
-        }
-
-        addTitle("HyperOS: giữ cập nhật chạy ổn định")
-        addNote("Không đặt các mục này thì HyperOS có thể dừng cập nhật nền, widget và thẻ khóa hiện ngày cũ.")
-        addButton("Tắt tối ưu pin cho app") {
-            safeStart(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        }
-        addButton("Tự khởi động (HyperOS) / chi tiết app") {
-            try {
-                startActivity(
-                    Intent().setClassName(
-                        "com.miui.securitycenter",
-                        "com.miui.permcenter.autostart.AutoStartManagementActivity"
-                    )
+            addSwitch("Hiện thẻ trên màn hình khóa", { Prefs.lockCard(this) }, {
+                Prefs.putBool(this, Prefs.LOCK_CARD, it)
+                if (it && !LockCard.hasPermission(this)) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5)
+                }
+            })
+            addSpinner("Kiểu thẻ", listOf("Bố cục riêng (font Google, đồng hồ chạy thật)", "Văn bản đơn giản của hệ thống"),
+                { Prefs.lockStyle(this) }, { Prefs.putInt(this, Prefs.LOCK_STYLE, it) })
+            addSpinner("Màu chữ của thẻ", listOf("Tự động theo giao diện sáng/tối", "Chữ trắng", "Chữ đen"),
+                { Prefs.lockColor(this) }, { Prefs.putInt(this, Prefs.LOCK_COLOR, it) })
+            addButton("Cài đặt thông báo của app") {
+                safeStart(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
                 )
-            } catch (e: Exception) {
-                safeStart(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
             }
         }
-        addNote("Thủ công: khóa app trong màn hình đa nhiệm (nhấn giữ thẻ app, chọn biểu tượng khóa).")
+
+        guard("HyperOS") {
+            addTitle("HyperOS: giữ cập nhật chạy ổn định")
+            addNote("Không đặt các mục này thì HyperOS có thể dừng cập nhật nền, widget và thẻ khóa hiện ngày cũ.")
+            addButton("Tắt tối ưu pin cho app") {
+                safeStart(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            }
+            addButton("Tự khởi động (HyperOS) / chi tiết app") {
+                try {
+                    startActivity(
+                        Intent().setClassName(
+                            "com.miui.securitycenter",
+                            "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                        )
+                    )
+                } catch (e: Exception) {
+                    safeStart(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                }
+            }
+            addNote("Thủ công: khóa app trong màn hình đa nhiệm (nhấn giữ thẻ app, chọn biểu tượng khóa).")
+        }
 
         refreshPreview()
         updateStatus()
@@ -402,13 +525,23 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        Updater.scheduleAll(this)
-        refreshPreview()
-        updateStatus()
+        if (!ready) return
+        try {
+            Updater.scheduleAll(this)
+            refreshPreview()
+            updateStatus()
+        } catch (t: Throwable) {
+            CrashLog.record(this, t, "onResume")
+        }
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(applyRunnable)
+        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        applyNow()
+        if (ready) applyNow()
     }
 }

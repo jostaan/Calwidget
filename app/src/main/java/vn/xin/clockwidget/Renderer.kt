@@ -10,6 +10,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.provider.AlarmClock
+import android.text.Layout
+import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
 import android.util.TypedValue
@@ -20,15 +22,114 @@ import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
 
-/** Dựng nội dung hiển thị: dòng chữ, ảnh chữ (đúng font) và RemoteViews cho widget và thẻ màn hình khóa. */
+/**
+ * Dựng nội dung hiển thị: dòng chữ, ảnh chữ (đúng font) và RemoteViews cho widget và thẻ màn hình khóa.
+ * RemoteViews không đổi được font lúc chạy nên chữ phụ được vẽ vào Bitmap bằng đúng Typeface;
+ * riêng đồng hồ dùng TextClock thật để chạy từng phút mà không cần cập nhật.
+ */
 object Renderer {
-    class Line(val text: String, val scale: Float, val bold: Boolean, val dim: Boolean)
+    /** maxLines: số dòng tối đa khi chữ phải xuống dòng (xuống ở dấu cách thường, không xuống ở NBSP). */
+    class Line(
+        val text: String,
+        val scale: Float,
+        val bold: Boolean,
+        val dim: Boolean,
+        val maxLines: Int = 1
+    )
 
-    // Phần đệm trong bố cục widget (dp, mỗi cạnh) và hệ số ước lượng chiều cao dòng đồng hồ.
-    private const val PAD_DP = 14
-    private const val CLOCK_LINE = 1.4f
+    private const val NBSP = ' '
+    private val CORNER_DRAWABLES = intArrayOf(R.drawable.bg_r0, R.drawable.bg_r12, R.drawable.bg_r22, R.drawable.bg_r32)
+
+    private fun nb(s: String): String = s.replace(' ', NBSP)
+
+    /** Nối các cụm bằng " · "; trong mỗi cụm dùng NBSP để chỉ xuống dòng ở dấu chấm giữa. */
+    private fun chunks(parts: List<String>): String =
+        parts.filter { it.isNotEmpty() }.joinToString(" · ") { nb(it) }
 
     private fun fmtTemp(v: Double): String = "${Math.round(v)}°"
+
+    private fun dateText(ctx: Context, today: LocalDate): String {
+        val wd = VnText.weekday(today.dayOfWeek)
+        val d = today.dayOfMonth
+        val m = today.monthValue
+        val y = today.year
+        return if (Prefs.longDate(ctx)) {
+            nb(wd) + ", " + nb("$d tháng $m, $y")
+        } else {
+            nb(wd) + ", " + String.format(Locale.US, "%02d/%02d/%d", d, m, y)
+        }
+    }
+
+    private fun staleSuffix(ctx: Context, w: Weather): String? {
+        if (WeatherRepo.ageMinutes(ctx) <= 90) return null
+        return "cập nhật " + SimpleDateFormat("HH:mm", Locale.US).format(Date(w.fetchedAt))
+    }
+
+    // ---------- Nội dung cho widget 2 cột ----------
+
+    /** Cột trái: ngày dương, âm lịch, can chi, ngày lễ và tiết khí. */
+    fun leftLines(ctx: Context): List<Line> {
+        val out = ArrayList<Line>()
+        val today = LocalDate.now()
+        val lunar = LunarCalendar.fromSolar(today.dayOfMonth, today.monthValue, today.year)
+        val lm = if (lunar.leap) "${lunar.month} nhuận" else "${lunar.month}"
+
+        out.add(Line(dateText(ctx, today), 1.2f, true, false, 2))
+
+        if (Prefs.showLunar(ctx)) {
+            out.add(Line(chunks(listOf("Âm lịch ${lunar.day}/$lm", "năm ${lunar.yearCanChi()}")), 1.0f, false, false, 2))
+            if (Prefs.lunarDetail(ctx)) {
+                out.add(Line(chunks(listOf("tháng ${lunar.monthCanChi()}", "ngày ${lunar.dayCanChi()}")), 0.95f, false, true, 2))
+            }
+        }
+        if (Prefs.showEvents(ctx)) {
+            val ev = ArrayList<String>(VnText.holidays(today))
+            val term = LunarCalendar.solarTermStartingOn(lunar.jd)
+            if (term != null) ev.add("Tiết $term")
+            if (ev.isNotEmpty()) out.add(Line(chunks(ev), 0.95f, false, true, 2))
+        }
+        return out
+    }
+
+    /** Cột phải: thời tiết. */
+    fun rightLines(ctx: Context): List<Line> {
+        val out = ArrayList<Line>()
+        if (!Prefs.showWeather(ctx)) return out
+        val w = WeatherRepo.load(ctx)
+        if (w == null) {
+            out.add(Line("Chưa có dữ liệu thời tiết", 1.0f, false, true, 2))
+            return out
+        }
+        out.add(Line("${VnText.weatherIcon(w.code, w.isDay)} ${Math.round(w.tempC)}°C", 2.0f, true, false, 1))
+
+        val desc = ArrayList<String>()
+        desc.add(VnText.weatherDesc(w.code))
+        if (!w.feelsC.isNaN()) desc.add("cảm giác ${fmtTemp(w.feelsC)}")
+        val stale = staleSuffix(ctx, w)
+        if (stale != null) desc.add(stale)
+        out.add(Line(chunks(desc), 1.0f, false, false, 2))
+
+        if (Prefs.showExtra(ctx)) {
+            val where = ArrayList<String>()
+            where.add(Prefs.locName(ctx))
+            if (!w.maxC.isNaN() && !w.minC.isNaN()) where.add("${fmtTemp(w.maxC)}/${fmtTemp(w.minC)}")
+            out.add(Line(chunks(where), 0.95f, false, true, 2))
+
+            val rain = ArrayList<String>()
+            rain.add("Mưa ${w.rainTodayPct}%")
+            if (w.rainNext6hPct > 0) rain.add("6 giờ tới ${w.rainNext6hPct}%")
+            out.add(Line(chunks(rain), 0.95f, false, true, 2))
+
+            val air = ArrayList<String>()
+            if (w.humidity >= 0) air.add("Ẩm ${w.humidity}%")
+            if (!w.uvMax.isNaN()) air.add("UV ${Math.round(w.uvMax)} (${VnText.uvLabel(w.uvMax)})")
+            if (w.aqi >= 0) air.add("AQI ${w.aqi} (${VnText.aqiLabel(w.aqi)})")
+            if (air.isNotEmpty()) out.add(Line(chunks(air), 0.95f, false, true, 2))
+        }
+        return out
+    }
+
+    // ---------- Nội dung cho thẻ màn hình khóa ----------
 
     private fun weatherLine(ctx: Context, compact: Boolean): Line {
         val w = WeatherRepo.load(ctx) ?: return Line("Chưa có dữ liệu thời tiết", 1.0f, false, true)
@@ -38,16 +139,14 @@ object Renderer {
         if (!compact && !w.feelsC.isNaN()) {
             sb.append(" · cảm giác ").append(fmtTemp(w.feelsC))
         }
-        if (WeatherRepo.ageMinutes(ctx) > 90) {
-            val t = SimpleDateFormat("HH:mm", Locale.US).format(Date(w.fetchedAt))
-            sb.append(" · cập nhật ").append(t)
-        }
+        val stale = staleSuffix(ctx, w)
+        if (stale != null) sb.append(" · ").append(stale)
         return Line(sb.toString(), 1.1f, false, false)
     }
 
     /**
      * compact = true: 2 dòng cho thẻ khóa thu gọn (ngày + âm lịch, thời tiết).
-     * compact = false: đầy đủ cho widget và thẻ khóa mở rộng.
+     * compact = false: đầy đủ, dùng cho thẻ mở rộng và kiểu văn bản đơn giản.
      */
     fun buildLines(ctx: Context, compact: Boolean): List<Line> {
         val out = ArrayList<Line>()
@@ -67,12 +166,12 @@ object Renderer {
             return out
         }
 
-        val dateText = if (Prefs.longDate(ctx)) {
+        val dateStr = if (Prefs.longDate(ctx)) {
             "$wd, $dd tháng $mm, $yy"
         } else {
             String.format(Locale.US, "%s, %02d/%02d/%d", wd, dd, mm, yy)
         }
-        out.add(Line(dateText, 1.25f, true, false))
+        out.add(Line(dateStr, 1.25f, true, false))
 
         if (Prefs.showLunar(ctx)) {
             val text = if (Prefs.lunarDetail(ctx)) {
@@ -87,9 +186,7 @@ object Renderer {
             val ev = ArrayList<String>(VnText.holidays(today))
             val term = LunarCalendar.solarTermStartingOn(lunar.jd)
             if (term != null) ev.add("Tiết $term")
-            if (ev.isNotEmpty()) {
-                out.add(Line(ev.joinToString(" · "), 0.95f, false, true))
-            }
+            if (ev.isNotEmpty()) out.add(Line(ev.joinToString(" · "), 0.95f, false, true))
         }
 
         if (Prefs.showWeather(ctx)) {
@@ -101,36 +198,22 @@ object Renderer {
                     l2.append(" · ").append(fmtTemp(w.maxC)).append("/").append(fmtTemp(w.minC))
                 }
                 l2.append(" · mưa ").append(w.rainTodayPct).append("%")
-                if (w.rainNext6hPct > 0) {
-                    l2.append(" (6 giờ tới ").append(w.rainNext6hPct).append("%)")
-                }
+                if (w.rainNext6hPct > 0) l2.append(" (6 giờ tới ").append(w.rainNext6hPct).append("%)")
                 out.add(Line(l2.toString(), 0.95f, false, true))
 
                 val parts = ArrayList<String>()
                 if (w.humidity >= 0) parts.add("Ẩm ${w.humidity}%")
-                if (!w.uvMax.isNaN()) {
-                    parts.add("UV ${Math.round(w.uvMax)} (${VnText.uvLabel(w.uvMax)})")
-                }
+                if (!w.uvMax.isNaN()) parts.add("UV ${Math.round(w.uvMax)} (${VnText.uvLabel(w.uvMax)})")
                 if (w.aqi >= 0) parts.add("AQI ${w.aqi} (${VnText.aqiLabel(w.aqi)})")
-                if (parts.isNotEmpty()) {
-                    out.add(Line(parts.joinToString(" · "), 0.95f, false, true))
-                }
+                if (parts.isNotEmpty()) out.add(Line(parts.joinToString(" · "), 0.95f, false, true))
             }
         }
         return out
     }
 
-    private class Row(
-        val text: String,
-        val size: Float,
-        val bold: Boolean,
-        val dim: Boolean,
-        val width: Float,
-        val ascent: Float,
-        val height: Float
-    )
+    // ---------- Vẽ chữ vào ảnh ----------
 
-    private class Layout(val rows: List<Row>, val total: Float)
+    private class Block(val layout: StaticLayout, val gap: Float)
 
     private fun typeface(ctx: Context, id: Int): Typeface {
         return try {
@@ -146,42 +229,63 @@ object Renderer {
     private fun dpToPx(ctx: Context, dp: Float): Float =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, ctx.resources.displayMetrics)
 
-    /** Đo từng dòng: co chữ cho vừa bề ngang, cắt "..." nếu vẫn quá rộng. */
-    private fun layoutRows(
+    private fun alignOf(a: Int): Layout.Alignment = when (a) {
+        1 -> Layout.Alignment.ALIGN_CENTER
+        2 -> Layout.Alignment.ALIGN_OPPOSITE
+        else -> Layout.Alignment.ALIGN_NORMAL
+    }
+
+    private fun makeLayout(text: String, paint: TextPaint, width: Int, maxLines: Int, align: Int): StaticLayout =
+        StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+            .setAlignment(alignOf(align))
+            .setMaxLines(maxLines)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .setIncludePad(false)
+            .build()
+
+    private fun truncated(l: StaticLayout): Boolean {
+        val last = l.lineCount - 1
+        return last >= 0 && l.getEllipsisCount(last) > 0
+    }
+
+    /** Mỗi dòng: xuống dòng tối đa maxLines; nếu vẫn bị cắt thì co chữ (tối thiểu 70%). */
+    private fun layoutBlocks(
         lines: List<Line>,
-        widthPx: Int,
+        textW: Int,
         basePx: Float,
+        color: Int,
+        align: Int,
         regular: Typeface,
         bold: Typeface
-    ): Layout {
-        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG)
-        val rows = ArrayList<Row>()
+    ): Pair<List<Block>, Float> {
+        val blocks = ArrayList<Block>()
         var total = 0f
         for (line in lines) {
-            var size = basePx * line.scale
+            val paint = TextPaint(Paint.ANTI_ALIAS_FLAG)
             paint.typeface = if (line.bold) bold else regular
+            val a = if (line.dim) (Color.alpha(color) * 0.82f).toInt() else Color.alpha(color)
+            paint.color = Color.argb(a, Color.red(color), Color.green(color), Color.blue(color))
+            var size = basePx * line.scale
+            val minSize = size * 0.7f
             paint.textSize = size
-            var text = line.text
-            val minSize = size * 0.65f
-            while (paint.measureText(text) > widthPx && size > minSize) {
+            var sl = makeLayout(line.text, paint, textW, line.maxLines, align)
+            while (truncated(sl) && size > minSize) {
                 size -= 1f
                 paint.textSize = size
+                sl = makeLayout(line.text, paint, textW, line.maxLines, align)
             }
-            if (paint.measureText(text) > widthPx) {
-                text = TextUtils.ellipsize(text, paint, widthPx.toFloat(), TextUtils.TruncateAt.END).toString()
-            }
-            val fm = paint.fontMetrics
-            val h = fm.descent - fm.ascent
-            rows.add(Row(text, size, line.bold, line.dim, paint.measureText(text), -fm.ascent, h))
-            total += h + size * 0.22f
+            val gap = size * 0.18f
+            blocks.add(Block(sl, gap))
+            total += sl.height + gap
         }
-        return Layout(rows, total)
+        return Pair(blocks, total)
     }
 
     /**
      * Vẽ các dòng chữ vào ảnh với đúng font.
      * maxHeightPx > 0: thu nhỏ cỡ chữ (tối thiểu 45%) cho vừa chiều cao.
      * exactHeight: ảnh có đúng chiều cao maxHeightPx (khớp tỉ lệ ô chứa trong widget).
+     * padL/padR: chừa lề trong ảnh (khe giữa hai cột). vCenter: căn giữa theo chiều dọc.
      */
     private fun infoBitmap(
         lines: List<Line>,
@@ -192,38 +296,39 @@ object Renderer {
         regular: Typeface,
         bold: Typeface,
         maxHeightPx: Int,
-        exactHeight: Boolean
+        exactHeight: Boolean,
+        padL: Int = 0,
+        padR: Int = 0,
+        vCenter: Boolean = false
     ): Bitmap {
+        val textW = (widthPx - padL - padR).coerceAtLeast(40)
         var f = 1f
-        var lay = layoutRows(lines, widthPx, basePx, regular, bold)
-        while (maxHeightPx > 0 && lay.total > maxHeightPx && f > 0.45f) {
+        var res = layoutBlocks(lines, textW, basePx, color, align, regular, bold)
+        while (maxHeightPx > 0 && res.second > maxHeightPx && f > 0.45f) {
             f -= 0.05f
-            lay = layoutRows(lines, widthPx, basePx * f, regular, bold)
+            res = layoutBlocks(lines, textW, basePx * f, color, align, regular, bold)
         }
 
-        var heightPx = Math.ceil(lay.total.toDouble()).toInt() + 4
+        var heightPx = Math.ceil(res.second.toDouble()).toInt() + 2
         if (maxHeightPx > 0) {
             heightPx = if (exactHeight) maxHeightPx else Math.min(heightPx, maxHeightPx)
         }
-        val bmp = Bitmap.createBitmap(widthPx, heightPx.coerceAtLeast(8), Bitmap.Config.ARGB_8888)
+        heightPx = heightPx.coerceAtLeast(8)
+
+        val bmp = Bitmap.createBitmap(widthPx.coerceAtLeast(8), heightPx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG)
-        var top = 0f
-        for (r in lay.rows) {
-            paint.typeface = if (r.bold) bold else regular
-            paint.textSize = r.size
-            val a = if (r.dim) (Color.alpha(color) * 0.82f).toInt() else Color.alpha(color)
-            paint.color = Color.argb(a, Color.red(color), Color.green(color), Color.blue(color))
-            val x = when (align) {
-                0 -> 0f
-                1 -> (widthPx - r.width) / 2f
-                else -> widthPx - r.width
-            }
-            canvas.drawText(r.text, x, top + r.ascent, paint)
-            top += r.height + r.size * 0.22f
+        var y = if (vCenter) Math.max(0f, (heightPx - res.second) / 2f) else 0f
+        for (b in res.first) {
+            canvas.save()
+            canvas.translate(padL.toFloat(), y)
+            b.layout.draw(canvas)
+            canvas.restore()
+            y += b.layout.height + b.gap
         }
         return bmp
     }
+
+    // ---------- PendingIntent ----------
 
     private fun openAppPi(ctx: Context): PendingIntent =
         PendingIntent.getActivity(
@@ -249,53 +354,86 @@ object Renderer {
         rv.setCharSequence(id, "setFormat12Hour", fmt)
     }
 
+    // ---------- Widget màn hình chính (2 cột) ----------
+
     /**
-     * RemoteViews cho widget màn hình chính. widthDp/heightDp là kích thước widget do launcher báo.
+     * Trái: đồng hồ (TextClock thật) + ngày, âm lịch. Phải: thời tiết.
+     * Tắt thời tiết thì cột trái chiếm toàn bộ bề rộng.
      * Căn lề đồng hồ: bố cục có 3 TextClock (trái, giữa, phải), chỉ một cái hiện.
+     * widthDp/heightDp là kích thước widget do launcher báo.
      */
     fun widgetViews(ctx: Context, widthDp: Int, heightDp: Int): RemoteViews {
         val f = FontCatalog.get(Prefs.font(ctx))
         val rv = RemoteViews(ctx.packageName, f.widgetLayout)
         val color = Prefs.textColor(ctx)
-        val align = Prefs.align(ctx)
+        val align = Prefs.align(ctx).coerceIn(0, 2)
+        val reg = typeface(ctx, f.regular)
+        val bold = typeface(ctx, f.bold)
 
-        val w = if (widthDp > 0) widthDp else 250
+        val w = if (widthDp > 0) widthDp else 300
         val h = if (heightDp > 0) heightDp else 150
-        val availH = (h - 2 * PAD_DP).coerceAtLeast(40)
+        val padPx = dpToPx(ctx, Prefs.padDp(ctx).toFloat()).toInt()
+        val wPx = dpToPx(ctx, w.toFloat()).toInt()
+        val hPx = dpToPx(ctx, h.toFloat()).toInt()
+        val innerW = (wPx - 2 * padPx).coerceAtLeast(160)
+        val availH = (hPx - 2 * padPx).coerceAtLeast(dpToPx(ctx, 40f).toInt())
 
-        // Đồng hồ không chiếm quá ~55% chiều cao khả dụng.
-        val maxClockSp = (availH * 0.55f / 1.3f).toInt().coerceAtLeast(24)
-        val clockSp = Math.min(Prefs.clockSp(ctx), maxClockSp)
+        val twoCol = Prefs.showWeather(ctx)
+        val colW = if (twoCol) innerW / 2 else innerW
+        val gapPx = if (twoCol) dpToPx(ctx, 6f).toInt() else 0
+
+        // Cỡ đồng hồ: không vượt cỡ người dùng chọn, không quá ~50% chiều cao, và phải vừa bề rộng cột.
+        val cp = TextPaint(Paint.ANTI_ALIAS_FLAG)
+        cp.typeface = bold
+        cp.textSize = 100f
+        val fm = cp.fontMetrics
+        val lineEm = (fm.descent - fm.ascent) / 100f
+        val widthEm = Math.max(cp.measureText("00:00"), cp.measureText("88:88")) / 100f
+        val unit = spToPx(ctx, 1f)
+        val byH = availH * 0.5f / lineEm / unit
+        val byW = (colW - gapPx) * 0.97f / widthEm / unit
+        val clockSp = Math.floor(minOf(Prefs.clockSp(ctx).toFloat(), byH, byW).toDouble()).toInt().coerceAtLeast(18)
 
         val ids = intArrayOf(R.id.clock, R.id.clock_c, R.id.clock_r)
         for (i in ids.indices) {
             applyClockStyle(ctx, rv, ids[i], color, clockSp)
-            rv.setViewVisibility(ids[i], if (i == align.coerceIn(0, 2)) View.VISIBLE else View.GONE)
+            rv.setViewVisibility(ids[i], if (i == align) View.VISIBLE else View.GONE)
             rv.setOnClickPendingIntent(ids[i], alarmsPi(ctx))
         }
 
-        val widthPx = dpToPx(ctx, (w - 2 * PAD_DP).coerceAtLeast(120).toFloat()).toInt().coerceIn(240, 1100)
-        val slotDp = availH - clockSp * CLOCK_LINE
-        val slotPx = dpToPx(ctx, slotDp.coerceAtLeast(24f)).toInt()
-        val bmp = infoBitmap(
-            buildLines(ctx, false),
-            widthPx,
-            spToPx(ctx, Prefs.infoSp(ctx).toFloat()),
-            color,
-            align,
-            typeface(ctx, f.regular),
-            typeface(ctx, f.bold),
-            slotPx,
-            true
+        val clockPx = spToPx(ctx, clockSp.toFloat()) * lineEm
+        val slotPx = (availH - clockPx).toInt().coerceAtLeast(dpToPx(ctx, 24f).toInt())
+        val baseInfo = spToPx(ctx, Prefs.infoSp(ctx).toFloat())
+
+        val left = infoBitmap(
+            leftLines(ctx), colW.coerceIn(120, 1100), baseInfo, color, align, reg, bold,
+            slotPx, true, 0, gapPx, false
         )
-        rv.setImageViewBitmap(R.id.info, bmp)
+        rv.setImageViewBitmap(R.id.info, left)
         rv.setOnClickPendingIntent(R.id.info, openAppPi(ctx))
 
+        if (twoCol) {
+            val right = infoBitmap(
+                rightLines(ctx), colW.coerceIn(120, 1100), baseInfo, color, align, reg, bold,
+                availH, true, gapPx, 0, true
+            )
+            rv.setImageViewBitmap(R.id.info2, right)
+            rv.setOnClickPendingIntent(R.id.info2, openAppPi(ctx))
+            rv.setViewVisibility(R.id.info2, View.VISIBLE)
+        } else {
+            rv.setViewVisibility(R.id.info2, View.GONE)
+        }
+
+        rv.setViewPadding(R.id.content, padPx, padPx, padPx, padPx)
+
         val bg = Prefs.bgColor(ctx)
+        rv.setImageViewResource(R.id.bg, CORNER_DRAWABLES[Prefs.corner(ctx)])
         rv.setInt(R.id.bg, "setColorFilter", Color.rgb(Color.red(bg), Color.green(bg), Color.blue(bg)))
         rv.setInt(R.id.bg, "setImageAlpha", (Prefs.bgAlpha(ctx) * 255 / 100).coerceIn(0, 255))
         return rv
     }
+
+    // ---------- Thẻ màn hình khóa ----------
 
     private fun isNight(ctx: Context): Boolean {
         val m = ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
@@ -313,7 +451,7 @@ object Renderer {
     /**
      * RemoteViews cho thẻ thông báo trên màn hình khóa.
      * Thu gọn: giới hạn ~44dp cao (vùng nội dung của thông báo thu gọn), 2 dòng.
-     * Mở rộng: đầy đủ các dòng như widget.
+     * Mở rộng: đầy đủ các dòng.
      */
     fun notifViews(ctx: Context, expanded: Boolean): RemoteViews {
         val f = FontCatalog.get(Prefs.font(ctx))
