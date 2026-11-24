@@ -1,4 +1,4 @@
-# Đồng hồ · Lịch · Thời tiết (widget cho Redmi K70 / HyperOS 3)
+# Đồng hồ · Lịch · Thời tiết (widget cho điện thoại android)
 
 Gói `vn.xin.clockwidget`. Hai phần hiển thị:
 
