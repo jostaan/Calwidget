@@ -2,28 +2,114 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:gravity="center_vertical"
+    android:layout_height="54dp"
     android:orientation="horizontal"
-    android:paddingTop="4dp"
-    android:paddingBottom="4dp">
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
 
     <TextClock
         android:id="@+id/clock"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="5"
+        android:autoSizeMaxTextSize="40sp"
+        android:autoSizeMinTextSize="16sp"
+        android:autoSizeStepGranularity="1sp"
+        android:autoSizeTextType="uniform"
         android:fontFamily="@font/be_vietnam_pro_bold"
         android:format12Hour="h:mm"
         android:format24Hour="HH:mm"
+        android:gravity="center_vertical|start"
         android:includeFontPadding="false"
-        android:singleLine="true"
+        android:maxLines="1"
         android:textColor="#FFFFFFFF"
-        android:textSize="32sp" />
+        android:textSize="30sp" />
 
-    <ImageView
-        android:id="@+id/info"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:scaleType="fitStart" />
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="8dp"
+        android:layout_weight="6"
+        android:gravity="center_vertical"
+        android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/dt1"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:autoSizeMaxTextSize="14sp"
+                android:autoSizeMinTextSize="8sp"
+                android:autoSizeStepGranularity="1sp"
+                android:autoSizeTextType="uniform"
+                android:ellipsize="end"
+                android:fontFamily="@font/be_vietnam_pro_bold"
+                android:gravity="center_vertical|start"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="Thứ Hai, 24/11"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/lu1"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:autoSizeMaxTextSize="13sp"
+                android:autoSizeMinTextSize="8sp"
+                android:autoSizeStepGranularity="1sp"
+                android:autoSizeTextType="uniform"
+                android:ellipsize="end"
+                android:fontFamily="@font/be_vietnam_pro_regular"
+                android:gravity="center_vertical|start"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="Âm lịch 16/10"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="8dp"
+        android:layout_weight="6"
+        android:gravity="center_vertical"
+        android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/wx1"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:autoSizeMaxTextSize="14sp"
+                android:autoSizeMinTextSize="8sp"
+                android:autoSizeStepGranularity="1sp"
+                android:autoSizeTextType="uniform"
+                android:ellipsize="end"
+                android:fontFamily="@font/be_vietnam_pro_bold"
+                android:gravity="center_vertical|start"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="29°C · Có mây"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/wx2"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:autoSizeMaxTextSize="13sp"
+                android:autoSizeMinTextSize="8sp"
+                android:autoSizeStepGranularity="1sp"
+                android:autoSizeTextType="uniform"
+                android:ellipsize="end"
+                android:fontFamily="@font/be_vietnam_pro_regular"
+                android:gravity="center_vertical|start"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="Ẩm 70% · Gió 12 km/h"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+    </LinearLayout>
 </LinearLayout>
