@@ -1,9 +1,14 @@
-# Đồng hồ · Lịch · Thời tiết (widget cho điện thoại android)
+# Đồng hồ · Lịch · Thời tiết (widget cho Redmi K70 / HyperOS 3)
 
 Gói `vn.xin.clockwidget`. Hai phần hiển thị:
 
-1. **Widget màn hình chính** (4×2, đổi kích thước được), **2 cột**: cột trái là đồng hồ chạy thật (TextClock), ngày dương, âm lịch + can chi, ngày lễ / Rằm / mùng 1 / tiết khí; cột phải là thời tiết Quận 11 (nhiệt độ, cảm giác, cao/thấp, xác suất mưa, độ ẩm, UV, AQI). Lề trong chỉnh 0–24 dp (mặc định 6), bo góc 4 mức. Lề do launcher HyperOS đặt quanh widget thì app không đổi được.
-2. **Thẻ màn hình khóa** (tùy chọn): thông báo ghim yên lặng, cùng nội dung, đồng hồ chạy thật.
+1. **Widget màn hình chính** (4×2, đổi kích thước được), chia **2 cột × 2 hàng**:
+   - Trái trên: đồng hồ chạy thật (TextClock), chữ lớn, đậm.
+   - Trái dưới: thời tiết Quận 11: nhiệt độ + mô tả, độ ẩm, gió, UV (chỉ số cao nhất trong ngày), chất lượng không khí (US AQI); dòng phụ tùy chọn: địa điểm, cao/thấp, xác suất mưa.
+   - Phải trên: thứ, ngày tháng.
+   - Phải dưới: âm lịch + can chi năm, can chi ngày, ngày hoàng đạo/hắc đạo (kèm sao), giờ hoàng đạo; ngày lễ/Rằm/mùng 1/tiết khí khi có.
+   Cỡ chữ tự co giãn theo kích thước widget (kéo cao/rộng hơn thì chữ to hơn). Lề trong chỉnh 0–24 dp (mặc định 6), bo góc 4 mức. Lề do launcher HyperOS đặt quanh widget thì app không đổi được.
+2. **Thẻ màn hình khóa** (tùy chọn): thông báo ghim yên lặng. Mở rộng ra thì cùng bố cục 2×2 như widget; thu gọn là một hàng (giờ | ngày, âm lịch | thời tiết).
 
 ## Giới hạn cần biết
 
@@ -11,7 +16,9 @@ Gói `vn.xin.clockwidget`. Hai phần hiển thị:
 - Thẻ khóa phụ thuộc cài đặt hiện thông báo trên màn hình khóa. Từ Android 14 bạn vuốt bỏ được thẻ; thẻ hiện lại ở lần cập nhật kế tiếp.
 - Font: 11 họ Google Fonts (OFL) đóng sẵn trong app, đủ dấu tiếng Việt. Thêm font mới cần build lại. App không tải font lúc chạy.
 - Thời tiết: Open-Meteo (không cần khóa, chỉ dùng phi thương mại). AQI là mô hình ~45 km, không phải số liệu trạm đo.
-- Nếu app báo lỗi hoặc văng: mở lại app, mục đầu trang hiện "Lỗi gần nhất" kèm nút **Sao chép lỗi**. Cuối trang có mục **Chẩn đoán** (job nền, báo thức, pin, thời tiết, lỗi mạng) kèm nút **Sao chép báo cáo**. Gửi nội dung đó để sửa chính xác. Đừng xóa dữ liệu app trước khi sao chép, vì thao tác đó xóa cả bản ghi lỗi.
+- Nếu màn hình chính của app tự thoát: mở biểu tượng **Chẩn đoán** (biểu tượng thứ hai trên màn hình chính, hoặc nhấn giữ biểu tượng app rồi chọn Chẩn đoán). Màn hình này độc lập, không dùng widget, font hay mạng. Nó hiện báo cáo (job nền, báo thức, pin, thời tiết, lỗi mạng, lỗi Java đã ghi, và "process chết đột ngột" kèm bước đang chạy) với nút **Sao chép báo cáo**. Đừng bấm "Xóa ghi nhận lỗi"/"Đặt lại" trước khi sao chép.
+- Phát hiện chết đột ngột (Guard): trước mỗi bước nguy cơ (dựng xem trước, vẽ widget, vẽ thẻ khóa, lấy thời tiết, lập lịch, dựng màn hình chính) app ghi một dấu; chạy xong thì xóa. Lần khởi động sau còn dấu nghĩa là bước đó đã làm process chết (lỗi native hoặc bị hệ thống giết) và app tự tắt phần nghi ngờ: tắt bản xem trước, chuyển widget sang chế độ an toàn (chỉ giờ và ngày), hoặc tắt thẻ khóa. Bật lại trong màn hình Chẩn đoán.
+- UV hiển thị là chỉ số cao nhất trong ngày (Open-Meteo `uv_index_max`), không phải UV tức thời; vì thế ghi "UV đỉnh". Ngày/giờ hoàng đạo tính theo bảng lịch vạn niên phổ biến (12 thần, 6 giờ hoàng đạo); các sách lịch có thể khác nhau ở một số cách chia.
 - Chưa chạy thử trên máy thật. Mã Kotlin đã được kiểm tra kiểu với Android API 33; tài nguyên và Gradle chỉ được xác nhận khi chạy workflow.
 
 ## Build bằng điện thoại (GitHub Actions)
@@ -46,5 +53,8 @@ Cập nhật sau này: chỉ tải đè `lockscreen-widget.zip`, chạy lại wo
 
 - `LunarCalendar.java`: âm lịch (thuật toán Hồ Ngọc Đức, UTC+7), can chi, 24 tiết khí.
 - `VnText.java`: thứ, mô tả thời tiết, UV/AQI, ngày lễ.
-- `WeatherRepo.kt`, `Renderer.kt`, `Updater.kt`, `LockCard.kt`, `Receivers.kt`, `MainActivity.kt`.
-- `res/font`: TTF; `res/layout/w_*` (widget), `n_*` (thẻ khóa) sinh theo từng font vì RemoteViews không đổi font lúc chạy.
+- `Almanac.java`: ngày hoàng đạo/hắc đạo (12 thần) và 6 giờ hoàng đạo.
+- `WeatherRepo.kt`, `Renderer.kt` (TextView thuần, không vẽ chữ vào ảnh, không emoji), `Updater.kt`, `LockCard.kt`, `Receivers.kt`, `MainActivity.kt`.
+- `Guard.kt` (dấu vết chết đột ngột), `CrashLog.kt`, `Diag.kt`, `DiagActivity.kt` (màn hình chẩn đoán độc lập).
+- `res/font`: TTF; `res/layout/w_*` (widget), `nb_*` (thẻ khóa mở rộng), `n_*` (thẻ khóa thu gọn) sinh theo từng font vì RemoteViews không đổi font lúc chạy.
+- Icon: `res/drawable/ic_launcher_*` (adaptive, có lớp đơn sắc cho biểu tượng theo chủ đề), `ic_stat_clock` (thông báo), `ic_shortcut_diag`.
