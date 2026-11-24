@@ -32,11 +32,9 @@ object Updater {
             for (id in widgetIds(c)) {
                 // Mỗi widget vẽ riêng: một widget lỗi không làm hỏng widget khác hay thẻ khóa.
                 try {
-                    val opt = mgr.getAppWidgetOptions(id)
-                    // Chế độ dọc: rộng = MIN_WIDTH, cao = MAX_HEIGHT.
-                    val wDp = opt.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250)
-                    val hDp = opt.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 150)
-                    mgr.updateAppWidget(id, Renderer.widgetViews(c, wDp, hDp))
+                    Guard.run(c, Guard.STAGE_WIDGET) {
+                        mgr.updateAppWidget(id, Renderer.widgetViews(c, Guard.safeDraw(c)))
+                    }
                 } catch (t: Throwable) {
                     CrashLog.record(c, t, "updateAll/widget $id")
                 }
@@ -45,7 +43,7 @@ object Updater {
             CrashLog.record(c, t, "updateAll")
         }
         try {
-            LockCard.update(c)
+            Guard.run(c, Guard.STAGE_LOCK) { LockCard.update(c) }
         } catch (t: Throwable) {
             CrashLog.record(c, t, "updateAll/lockcard")
         }
@@ -55,7 +53,7 @@ object Updater {
     fun refreshWeather(ctx: Context, force: Boolean): Boolean {
         val c = ctx.applicationContext
         if (!force && WeatherRepo.ageMinutes(c) < STALE_MINUTES) return true
-        return WeatherRepo.refresh(c)
+        return Guard.run(c, Guard.STAGE_WEATHER) { WeatherRepo.refresh(c) }
     }
 
     /** Có cần chạy nền không: có widget trên màn hình hoặc bật thẻ khóa. */
@@ -64,6 +62,10 @@ object Updater {
     /** Mỗi bước được bọc riêng: một lỗi lập lịch không được làm văng app hay các bước còn lại. */
     fun scheduleAll(ctx: Context) {
         val c = ctx.applicationContext
+        Guard.run(c, Guard.STAGE_SCHEDULE) { scheduleAllInner(c) }
+    }
+
+    private fun scheduleAllInner(c: Context) {
         val need = try {
             needed(c)
         } catch (e: Throwable) {

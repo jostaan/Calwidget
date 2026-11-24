@@ -124,16 +124,28 @@ class MainActivity : Activity() {
 
     private fun refreshPreview() {
         previewHost.removeAllViews()
-        val dm = resources.displayMetrics
-        val wDp = ((dm.widthPixels / dm.density) - 32f).toInt().coerceAtLeast(200)
+        if (Prefs.previewOff(this)) {
+            val tv = TextView(this)
+            tv.text = "Bản xem trước đang tắt (lần trước process chết ở bước dựng xem trước). " +
+                "Widget thật trên màn hình chính không bị ảnh hưởng. Bật lại trong mục Chẩn đoán."
+            tv.setTextColor(Color.WHITE)
+            tv.textSize = 13f
+            tv.setPadding(dp(12), dp(12), dp(12), dp(12))
+            previewHost.addView(tv)
+            return
+        }
         try {
-            val rv = Renderer.widgetViews(applicationContext, wDp, PREVIEW_H_DP)
-            previewHost.addView(rv.apply(this, previewHost))
+            Guard.run(this, Guard.STAGE_PREVIEW) {
+                val rv = Renderer.widgetViews(applicationContext, false)
+                previewHost.addView(rv.apply(this, previewHost))
+            }
         } catch (t: Throwable) {
             CrashLog.record(this, t, "preview")
+            previewHost.removeAllViews()
             val tv = TextView(this)
             tv.text = "Không dựng được bản xem trước: " + t.javaClass.simpleName
             tv.setTextColor(Color.WHITE)
+            tv.setPadding(dp(12), dp(12), dp(12), dp(12))
             previewHost.addView(tv)
         }
     }
@@ -366,7 +378,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
-            build()
+            Guard.run(this, Guard.STAGE_MAIN) { build() }
             ready = true
         } catch (t: Throwable) {
             CrashLog.record(this, t, "onCreate")
@@ -385,6 +397,10 @@ class MainActivity : Activity() {
         col.addView(head, lp())
 
         guard("lỗi đã ghi") {
+            val death = Guard.deathNote(this)
+            if (death.isNotEmpty()) {
+                addNote(death)
+            }
             val last = CrashLog.last(this)
             if (last.isNotEmpty()) {
                 addNote("Lỗi gần nhất được ghi lại (sao chép gửi người hỗ trợ nếu app còn lỗi):")
@@ -394,8 +410,11 @@ class MainActivity : Activity() {
                 tv.setTextIsSelectable(true)
                 col.addView(tv, lp())
                 addButton("Sao chép lỗi") { copyText("lỗi", last) }
+            }
+            if (last.isNotEmpty() || death.isNotEmpty()) {
                 addButton("Xóa ghi nhận lỗi") {
                     CrashLog.clear(this)
+                    Guard.clearNotes(this)
                     recreate()
                 }
             }
@@ -439,7 +458,10 @@ class MainActivity : Activity() {
 
         guard("bố cục") {
             addTitle("Bố cục widget")
-            addNote("Hai cột: trái là đồng hồ, ngày, âm lịch; phải là thời tiết. Tắt thời tiết thì cột trái chiếm cả widget.")
+            addNote(
+                "Hai cột. Trái: đồng hồ (trên), thời tiết (dưới). Phải: thứ ngày tháng (trên), âm lịch và hoàng đạo (dưới). " +
+                    "Cỡ chữ tự co giãn theo kích thước widget: kéo giãn widget để chữ to hơn."
+            )
             addSeek("Lề trong widget (dp, 0 = sát viền)", 0, 24, { Prefs.padDp(this) }, { Prefs.putInt(this, Prefs.PAD_DP, it) })
             addSpinner("Bo góc nền", listOf("Vuông", "Nhỏ", "Vừa", "Lớn"),
                 { Prefs.corner(this) }, { Prefs.putInt(this, Prefs.CORNER, it) })
@@ -449,11 +471,6 @@ class MainActivity : Activity() {
             addTitle("Kiểu chữ")
             addSpinner("Font Google", FontCatalog.all.map { it.label },
                 { Prefs.font(this) }, { Prefs.putInt(this, Prefs.FONT, it) })
-            addSpinner("Căn lề chữ trong mỗi cột", listOf("Căn trái", "Căn giữa", "Căn phải"),
-                { Prefs.align(this) }, { Prefs.putInt(this, Prefs.ALIGN, it) })
-            addSeek("Cỡ chữ đồng hồ tối đa (sp, tự thu nhỏ nếu không vừa cột)", 30, 110,
-                { Prefs.clockSp(this) }, { Prefs.putInt(this, Prefs.CLOCK_SP, it) })
-            addSeek("Cỡ chữ thông tin (sp)", 10, 24, { Prefs.infoSp(this) }, { Prefs.putInt(this, Prefs.INFO_SP, it) })
         }
 
         guard("màu sắc") {
@@ -466,12 +483,13 @@ class MainActivity : Activity() {
         guard("nội dung") {
             addTitle("Nội dung")
             addSwitch("Đồng hồ 24 giờ", { Prefs.is24h(this) }, { Prefs.putBool(this, Prefs.H24, it) })
-            addSwitch("Ngày dạng dài (22 tháng 11, 2026)", { Prefs.longDate(this) }, { Prefs.putBool(this, Prefs.LONG_DATE, it) })
+            addSwitch("Ngày dạng dài (24 tháng 11, 2026)", { Prefs.longDate(this) }, { Prefs.putBool(this, Prefs.LONG_DATE, it) })
             addSwitch("Âm lịch", { Prefs.showLunar(this) }, { Prefs.putBool(this, Prefs.SHOW_LUNAR, it) })
-            addSwitch("Âm lịch chi tiết (can chi tháng, ngày)", { Prefs.lunarDetail(this) }, { Prefs.putBool(this, Prefs.LUNAR_DETAIL, it) })
+            addSwitch("Âm lịch chi tiết (can chi ngày)", { Prefs.lunarDetail(this) }, { Prefs.putBool(this, Prefs.LUNAR_DETAIL, it) })
+            addSwitch("Hoàng đạo (ngày hoàng đạo/hắc đạo, giờ hoàng đạo)", { Prefs.showAlmanac(this) }, { Prefs.putBool(this, Prefs.SHOW_ALMANAC, it) })
             addSwitch("Ngày lễ, Rằm, mùng 1 và tiết khí", { Prefs.showEvents(this) }, { Prefs.putBool(this, Prefs.SHOW_EVENTS, it) })
-            addSwitch("Thời tiết (cột phải)", { Prefs.showWeather(this) }, { Prefs.putBool(this, Prefs.SHOW_WEATHER, it) })
-            addSwitch("Chi tiết thời tiết (cao/thấp, mưa, ẩm, UV, AQI)", { Prefs.showExtra(this) }, { Prefs.putBool(this, Prefs.SHOW_EXTRA, it) })
+            addSwitch("Thời tiết (ô dưới bên trái)", { Prefs.showWeather(this) }, { Prefs.putBool(this, Prefs.SHOW_WEATHER, it) })
+            addSwitch("Dòng phụ thời tiết (địa điểm, cảm giác, cao/thấp, mưa)", { Prefs.showExtra(this) }, { Prefs.putBool(this, Prefs.SHOW_EXTRA, it) })
         }
 
         guard("màn hình khóa") {
@@ -487,7 +505,7 @@ class MainActivity : Activity() {
                     requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5)
                 }
             })
-            addSpinner("Kiểu thẻ", listOf("Bố cục riêng (font Google, đồng hồ chạy thật)", "Văn bản đơn giản của hệ thống"),
+            addSpinner("Kiểu thẻ", listOf("Bố cục riêng 2x2 (font Google, đồng hồ chạy thật)", "Văn bản đơn giản của hệ thống"),
                 { Prefs.lockStyle(this) }, { Prefs.putInt(this, Prefs.LOCK_STYLE, it) })
             addSpinner("Màu chữ của thẻ", listOf("Tự động theo giao diện sáng/tối", "Chữ trắng", "Chữ đen"),
                 { Prefs.lockColor(this) }, { Prefs.putInt(this, Prefs.LOCK_COLOR, it) })
@@ -530,6 +548,8 @@ class MainActivity : Activity() {
             diagView = tv
             addButton("Sao chép báo cáo") { copyText("báo cáo", Diag.report(this)) }
             addButton("Làm mới báo cáo") { diagView?.text = Diag.report(this) }
+            addButton("Mở màn hình Chẩn đoán riêng") { safeStart(Intent(this, DiagActivity::class.java)) }
+            addNote("Màn hình Chẩn đoán cũng có thể mở từ biểu tượng \"Chẩn đoán\" trên màn hình chính (hoặc nhấn giữ biểu tượng app).")
         }
 
         refreshPreview()

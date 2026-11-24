@@ -12,7 +12,7 @@ import android.content.pm.PackageManager
 /**
  * Thẻ thông báo ghim hiển thị trên màn hình khóa.
  * Widget bên thứ ba không lên được màn hình khóa HyperOS, nên đây là cách thay thế
- * dùng API chuẩn. Kiểu 0 dùng bố cục riêng (font Google, đồng hồ chạy thật);
+ * dùng API chuẩn. Kiểu 0 dùng bố cục riêng 2x2 (font Google, đồng hồ chạy thật);
  * kiểu 1 là văn bản thường của hệ thống, phòng khi bố cục riêng không hiện.
  */
 object LockCard {
@@ -50,7 +50,7 @@ object LockCard {
         )
 
         val b = Notification.Builder(c, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_menu_today)
+            .setSmallIcon(R.drawable.ic_stat_clock)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
@@ -63,12 +63,10 @@ object LockCard {
             b.setCustomContentView(Renderer.notifViews(c, false))
             b.setCustomBigContentView(Renderer.notifViews(c, true))
         } else {
-            val lines = Renderer.buildLines(c, false)
-            val title = if (lines.isNotEmpty()) lines[0].text else "Đồng hồ"
-            val rest = lines.drop(1).joinToString("\n") { it.text }
-            b.setContentTitle(title)
-            b.setContentText(if (lines.size > 1) lines[1].text else "")
-            b.setStyle(Notification.BigTextStyle().bigText(rest))
+            val lines = Renderer.plainLines(c)
+            b.setContentTitle(if (lines.isNotEmpty()) lines[0] else "Đồng hồ")
+            b.setContentText(if (lines.size > 1) lines[1] else "")
+            b.setStyle(Notification.BigTextStyle().bigText(lines.drop(1).joinToString("\n")))
         }
         nm.notify(ID, b.build())
     }

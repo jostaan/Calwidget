@@ -67,6 +67,11 @@ object Diag {
         val err = Prefs.str(c, Prefs.LAST_ERR, "")
         sb.append("Lỗi thời tiết gần nhất: ").append(if (err.isEmpty()) "không" else err).append('\n')
 
+        sb.append("Chế độ an toàn widget: ").append(safe { yn(Guard.safeDraw(c), "ĐANG BẬT (widget chỉ hiện giờ và ngày)", "tắt") }).append('\n')
+        sb.append("Bản xem trước trong app: ").append(safe { yn(Prefs.previewOff(c), "ĐANG TẮT", "bật") }).append('\n')
+        val death = Guard.deathNote(c)
+        sb.append("Process chết đột ngột: ").append(if (death.isEmpty()) "chưa ghi nhận" else death).append('\n')
+
         val crash = CrashLog.last(c)
         sb.append("Lỗi ghi nhận: ").append(if (crash.isEmpty()) "không" else "\n" + crash.take(1200))
         return sb.toString()
