@@ -9,12 +9,30 @@
     <application
         android:name=".App"
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.ClockWidget">
 
         <activity
             android:name=".MainActivity"
             android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- Màn hình chẩn đoán độc lập: có biểu tượng riêng để vẫn mở được khi màn hình chính tự thoát. -->
+        <activity
+            android:name=".DiagActivity"
+            android:exported="true"
+            android:icon="@drawable/ic_shortcut_diag"
+            android:label="@string/diag_label"
+            android:roundIcon="@drawable/ic_shortcut_diag">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
