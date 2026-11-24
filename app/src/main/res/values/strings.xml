@@ -3,4 +3,6 @@
     <string name="app_name">Đồng hồ Lịch Thời tiết</string>
     <string name="widget_label">Đồng hồ, lịch âm, thời tiết</string>
     <string name="widget_desc">Giờ, ngày dương và âm lịch, thời tiết</string>
+    <string name="diag_label">Chẩn đoán</string>
+    <string name="shortcut_diag_long">Chẩn đoán (xem lỗi, báo cáo)</string>
 </resources>
