@@ -13,8 +13,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      # Đặt "true" để căn giữa ô thời tiết (trên-phải); đặt "false" để trở về bố cục gốc.
-      CENTER_WEATHER: "true"
+      # ===== CÁC NÚT CHỈNH (sửa số rồi chạy lại workflow, không cần tải lại zip) =====
+      # "true": căn giữa ô thời tiết và ô âm lịch (ô ngày vốn đã giữa; ô sự kiện luôn căn trái).
+      # "false": giữ bố cục gốc.
+      CENTER_CELLS: "true"
+      # Cỡ chữ (sp) theo 6 vai trò. Bản gốc: 60 / 40 / 24 / 16 / 13 / 12 và icon 36.
+      # Chỉ nhập bội của 0.5 (ví dụ 12.5). Đặt lại đúng số gốc để trở về cỡ ban đầu.
+      SZ_HERO: "59"      # ngày dương
+      SZ_DISPLAY: "39"   # nhiệt độ
+      SZ_TITLE: "23"     # ngày âm
+      SZ_HEADING: "15"   # tháng, thứ
+      SZ_BODY: "12.5"    # nội dung (gió, UV, AQI, sự kiện...)
+      SZ_CAPTION: "11.5" # chú thích
+      SZ_ICON: "35"      # biểu tượng thời tiết (dp)
     steps:
       - uses: actions/checkout@v5
 
@@ -29,26 +40,75 @@ jobs:
           unzip -q lockscreen-widget.zip -d _widget_src
           test -f _widget_src/lockscreen-widget/settings.gradle.kts
 
-      - name: Center weather cell
-        if: ${{ env.CENTER_WEATHER == 'true' }}
+      - name: Tune layout (center cells, font sizes)
         run: |
           python3 - <<'PY'
-          import glob, os
-          base = "_widget_src/lockscreen-widget/app/src/main/res/layout"
-          files = [f for p in ("w_", "nb_", "wp_") for f in glob.glob(os.path.join(base, p + "*.xml"))]
-          n = 0
-          for f in sorted(files):
-              s = open(f, encoding="utf-8").read()
-              a = s.index("@+id/box_wx")
-              b = s.index("@+id/row2")
-              seg = s[a:b]
-              seg = seg.replace('android:gravity="start|center_vertical"', 'android:gravity="center"')
-              seg = seg.replace('android:gravity="center_vertical"', 'android:gravity="center"')
-              seg = seg.replace('android:paddingStart="8dp"', 'android:gravity="center_horizontal" android:paddingStart="8dp"', 1)
-              open(f, "w", encoding="utf-8").write(s[:a] + seg + s[b:])
-              n += 1
-          print("Da can giua o thoi tiet trong", n, "tep layout")
-          assert n == 36, "Khong thay du 36 tep layout"
+          import glob, os, re
+
+          src = "_widget_src/lockscreen-widget/app/src/main"
+          lay = src + "/res/layout"
+          renderer = src + "/java/vn/xin/clockwidget/Renderer.kt"
+
+          # ---------- 1) Căn giữa ô thời tiết và ô âm lịch ----------
+          if os.environ.get("CENTER_CELLS", "true") == "true":
+              files = sorted(f for p in ("w_", "nb_", "wp_") for f in glob.glob(lay + "/" + p + "*.xml"))
+              assert len(files) == 36, "Can 36 tep layout, thay %d" % len(files)
+
+              def cut(s, start_id, end_id):
+                  a = s.index('@+id/' + start_id)
+                  b = s.index('@+id/' + end_id)
+                  return s[:a], s[a:b], s[b:]
+
+              def center_texts(seg):
+                  seg = seg.replace('android:gravity="start|center_vertical"', 'android:gravity="center"')
+                  return seg.replace('android:gravity="center_vertical"', 'android:gravity="center"')
+
+              def center_box(seg, pad):
+                  assert pad in seg
+                  return seg.replace(pad, 'android:gravity="center_horizontal"\n                ' + pad, 1)
+
+              for f in files:
+                  s = open(f, encoding="utf-8").read()
+                  # Thời tiết: từ box_wx đến row2 (hàng dưới).
+                  head, seg, tail = cut(s, "box_wx", "row2")
+                  s = head + center_box(center_texts(seg), 'android:paddingStart="8dp"') + tail
+                  # Âm lịch: từ box_lu đến dvv2 (đường kẻ trước ô sự kiện).
+                  head, seg, tail = cut(s, "box_lu", "dvv2")
+                  seg = center_box(center_texts(seg), 'android:paddingEnd="8dp"')
+                  # Tên sao hoàng/hắc đạo: bỏ trọng số để cả cụm chấm + chữ nằm giữa.
+                  seg, n = re.subn(
+                      r'(android:id="@\+id/lu3b"\s+)android:layout_width="0dp"(\s+)android:layout_height="wrap_content"(\s+)android:layout_weight="1"',
+                      r'\1android:layout_width="wrap_content"\2android:layout_height="wrap_content"', seg)
+                  assert n == 1, "Khong sua duoc lu3b trong " + f
+                  open(f, "w", encoding="utf-8").write(head + seg + tail)
+              print("Da can giua o thoi tiet va o am lich trong", len(files), "tep layout")
+
+          # ---------- 2) Cỡ chữ ----------
+          OLD = {"HERO": 60.0, "DISPLAY": 40.0, "TITLE": 24.0, "HEADING": 16.0, "BODY": 13.0, "CAPTION": 12.0, "ICON_DP": 36.0}
+          KEY = {"HERO": "SZ_HERO", "DISPLAY": "SZ_DISPLAY", "TITLE": "SZ_TITLE", "HEADING": "SZ_HEADING",
+                 "BODY": "SZ_BODY", "CAPTION": "SZ_CAPTION", "ICON_DP": "SZ_ICON"}
+          new = {}
+          for k, v in OLD.items():
+              x = float(os.environ.get(KEY[k], "").strip() or v)
+              assert 6 <= x <= 80 and (x * 2) % 1 == 0, KEY[k] + " phai la boi cua 0.5 trong khoang 6-80"
+              new[k] = x
+          fmt = lambda x: ("%g" % x)
+
+          s = open(renderer, encoding="utf-8").read()
+          for k in OLD:
+              s, n = re.subn(r'(private const val %s = )[0-9.]+f' % k, lambda m: m.group(1) + fmt(new[k]) + "f", s)
+              assert n == 1, "Khong thay hang so " + k + " trong Renderer.kt"
+          open(renderer, "w", encoding="utf-8").write(s)
+
+          # Cỡ chữ mẫu trong layout (dùng cho xem trước ở màn chọn widget); lúc chạy Renderer đặt lại cỡ thật.
+          size_map = {OLD[k]: new[k] for k in ("HERO", "DISPLAY", "TITLE", "HEADING", "BODY", "CAPTION")}
+          def sp(m):
+              v = float(m.group(1))
+              return 'android:textSize="%ssp"' % fmt(size_map.get(v, v))
+          for f in glob.glob(lay + "/*.xml"):
+              t = open(f, encoding="utf-8").read()
+              open(f, "w", encoding="utf-8").write(re.sub(r'android:textSize="([0-9.]+)sp"', sp, t))
+          print("Co chu:", {k: fmt(v) for k, v in new.items()})
           PY
 
       - uses: actions/setup-java@v5
