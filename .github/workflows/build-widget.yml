@@ -12,6 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # Đặt "true" để căn giữa ô thời tiết (trên-phải); đặt "false" để trở về bố cục gốc.
+      CENTER_WEATHER: "true"
     steps:
       - uses: actions/checkout@v5
 
@@ -25,6 +28,28 @@ jobs:
           mkdir _widget_src
           unzip -q lockscreen-widget.zip -d _widget_src
           test -f _widget_src/lockscreen-widget/settings.gradle.kts
+
+      - name: Center weather cell
+        if: ${{ env.CENTER_WEATHER == 'true' }}
+        run: |
+          python3 - <<'PY'
+          import glob, os
+          base = "_widget_src/lockscreen-widget/app/src/main/res/layout"
+          files = [f for p in ("w_", "nb_", "wp_") for f in glob.glob(os.path.join(base, p + "*.xml"))]
+          n = 0
+          for f in sorted(files):
+              s = open(f, encoding="utf-8").read()
+              a = s.index("@+id/box_wx")
+              b = s.index("@+id/row2")
+              seg = s[a:b]
+              seg = seg.replace('android:gravity="start|center_vertical"', 'android:gravity="center"')
+              seg = seg.replace('android:gravity="center_vertical"', 'android:gravity="center"')
+              seg = seg.replace('android:paddingStart="8dp"', 'android:gravity="center_horizontal" android:paddingStart="8dp"', 1)
+              open(f, "w", encoding="utf-8").write(s[:a] + seg + s[b:])
+              n += 1
+          print("Da can giua o thoi tiet trong", n, "tep layout")
+          assert n == 36, "Khong thay du 36 tep layout"
+          PY
 
       - uses: actions/setup-java@v5
         with:
